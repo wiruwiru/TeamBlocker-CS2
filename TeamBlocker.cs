@@ -1,0 +1,221 @@
+using CounterStrikeSharp.API;
+using CounterStrikeSharp.API.Core;
+using CounterStrikeSharp.API.Modules.Utils;
+using CounterStrikeSharp.API.Core.Attributes;
+using CounterStrikeSharp.API.Modules.Commands;
+
+using TeamBlocker.Configs;
+using TeamBlocker.Utils;
+
+namespace TeamBlocker;
+
+[MinimumApiVersion(346)]
+public class TeamBlocker : BasePlugin, IPluginConfig<BaseConfigs>
+{
+	public override string ModuleName => "TeamBlocker";
+	public override string ModuleVersion => "1.0.0";
+	public override string ModuleAuthor => "luca.uy";
+	public override string ModuleDescription => "Restricts how many players can join a team.";
+
+	public required BaseConfigs Config { get; set; }
+
+	public void OnConfigParsed(BaseConfigs config)
+	{
+		Config = config;
+		Utils.Logger.Config = config;
+	}
+
+	public override void Load(bool hotReload)
+	{
+		if (hotReload)
+		{
+			Utils.Logger.LogInfo("Plugin", "Reloading plugin...");
+		}
+
+		AddCommandListener("jointeam", JoinTeamListener, HookMode.Pre);
+		RegisterEventHandler<EventPlayerConnectFull>(OnPlayerConnectFull);
+		RegisterEventHandler<EventPlayerTeam>(OnPlayerTeam, HookMode.Pre);
+	}
+
+	public override void OnAllPluginsLoaded(bool hotReload)
+	{
+		RegisterListener<Listeners.OnServerPrecacheResources>(OnServerPrecacheResources);
+	}
+
+	private void OnServerPrecacheResources(ResourceManifest manifest)
+	{
+		if (!string.IsNullOrWhiteSpace(Config.SoundSettings.SoundFilePath))
+		{
+			manifest.AddResource(Config.SoundSettings.SoundFilePath);
+		}
+	}
+
+	public HookResult JoinTeamListener(CCSPlayerController? player, CommandInfo info)
+	{
+		if (player is null || !player.IsValid)
+		{
+			Utils.Logger.LogDebug("JoinTeamListener", "Player is null or invalid");
+			return HookResult.Continue;
+		}
+
+		Utils.Logger.LogDebug("JoinTeamListener", $"Player {player.PlayerName} (Slot {player.Slot})");
+		Utils.Logger.LogDebug("JoinTeamListener", $"ArgString: '{info.ArgString}', ArgCount: {info.ArgCount}");
+		Utils.Logger.LogDebug("JoinTeamListener", $"Current team: {player.Team} ({(int)player.Team})");
+
+		if (info.ArgCount < 2)
+		{
+			Utils.Logger.LogDebug("JoinTeamListener", "Not enough arguments");
+			return HookResult.Continue;
+		}
+
+		string targetTeamArg = info.GetArg(1);
+		Utils.Logger.LogDebug("JoinTeamListener", $"Target team arg: '{targetTeamArg}'");
+
+		if (targetTeamArg == "1")
+		{
+			Utils.Logger.LogDebug("JoinTeamListener", "Spectator requested - changing team");
+			Server.NextFrame(() =>
+			{
+				if (player.IsValid)
+				{
+					player.ChangeTeam(CsTeam.Spectator);
+				}
+			});
+			return HookResult.Handled;
+		}
+
+		if (targetTeamArg == "0")
+		{
+			Utils.Logger.LogDebug("JoinTeamListener", "Auto-select team requested");
+			return HookResult.Continue;
+		}
+
+		if (targetTeamArg != "2" && targetTeamArg != "3")
+		{
+			Utils.Logger.LogDebug("JoinTeamListener", $"Unknown team arg '{targetTeamArg}', allowing");
+			return HookResult.Continue;
+		}
+
+		CsTeam targetTeam = targetTeamArg == "2" ? CsTeam.Terrorist : CsTeam.CounterTerrorist;
+		string teamName = targetTeamArg == "2" ? "Terrorist" : "Counter-Terrorist";
+
+		Utils.Logger.LogDebug("JoinTeamListener", $"Target team: {targetTeam} ({teamName})");
+
+		if (player.Team == targetTeam)
+		{
+			Utils.Logger.LogDebug("JoinTeamListener", $"Player already in target team {targetTeam}, allowing");
+			return HookResult.Continue;
+		}
+
+		int ctCount = TeamHelper.GetCurrentNumPlayersExcept(CsTeam.CounterTerrorist, player);
+		int tCount = TeamHelper.GetCurrentNumPlayersExcept(CsTeam.Terrorist, player);
+
+		int ctMax = Config.TeamSettings.MaxCounterTerrorists;
+		int tMax = Config.TeamSettings.MaxTerrorists;
+
+		Utils.Logger.LogDebug("TeamJoin", $"Player {player.PlayerName} attempting to join {teamName}");
+		Utils.Logger.LogDebug("TeamJoin", $"Current counts: CT={ctCount}/{ctMax}, T={tCount}/{tMax}");
+
+		bool isBlocked = false;
+		int maxCount = 0;
+
+		if (targetTeamArg == "3" && ctCount >= ctMax)
+		{
+			isBlocked = true;
+			maxCount = ctMax;
+		}
+		else if (targetTeamArg == "2" && tCount >= tMax)
+		{
+			isBlocked = true;
+			maxCount = tMax;
+		}
+
+		if (isBlocked)
+		{
+			Utils.Logger.LogDebug("TeamJoin", $"Player {player.PlayerName} BLOCKED from joining {teamName} team");
+
+			Server.NextFrame(() =>
+			{
+				if (player.IsValid)
+				{
+					player.PrintToChat($" {Localizer["prefix"]} {Localizer["team.full", teamName, maxCount]}");
+				}
+			});
+
+			if (player.Team is CsTeam.None)
+			{
+				Server.NextFrame(() =>
+				{
+					if (player.IsValid)
+					{
+						player.ChangeTeam(CsTeam.Spectator);
+					}
+				});
+			}
+
+			Server.NextFrame(() =>
+			{
+				try
+				{
+					if (player.IsValid && !string.IsNullOrWhiteSpace(Config.SoundSettings.SoundEvent))
+					{
+						var filter = new RecipientFilter(player);
+						player?.EmitSound(Config.SoundSettings.SoundEvent, volume: 1f, recipients: filter);
+					}
+				}
+				catch (Exception ex)
+				{
+					Utils.Logger.LogError("Sound", $"Error playing sound to player {player.PlayerName}: {ex.Message}");
+				}
+			});
+
+			return HookResult.Handled;
+		}
+
+		Utils.Logger.LogDebug("TeamJoin", $"Player {player.PlayerName} ALLOWED to join {teamName} team - executing change");
+
+		Server.NextFrame(() =>
+		{
+			if (player.IsValid)
+			{
+				player.ChangeTeam(targetTeam);
+			}
+		});
+
+		return HookResult.Handled;
+	}
+
+	private HookResult OnPlayerConnectFull(EventPlayerConnectFull @event, GameEventInfo info)
+	{
+		CCSPlayerController? player = @event.Userid;
+
+		if (player is null || !player.IsValid || player.IsBot || player.IsHLTV)
+			return HookResult.Continue;
+
+		if (!Config.TeamSettings.MoveToSpectatorOnConnect)
+			return HookResult.Continue;
+
+		Server.NextFrame(() =>
+		{
+			if (player.IsValid)
+			{
+				player.ChangeTeam(CsTeam.Spectator);
+				Utils.Logger.LogDebug("PlayerConnect", $"Moved {player.PlayerName} to spectator on connect");
+			}
+		});
+
+		return HookResult.Continue;
+	}
+
+	private HookResult OnPlayerTeam(EventPlayerTeam @event, GameEventInfo info)
+	{
+		info.DontBroadcast = true;
+		return HookResult.Changed;
+	}
+
+	public override void Unload(bool hotReload)
+	{
+		RemoveCommandListener("jointeam", JoinTeamListener, HookMode.Pre);
+		Utils.Logger.LogDebug("Plugin", "Plugin unloaded, clearing data...");
+	}
+}
