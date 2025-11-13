@@ -13,11 +13,12 @@ namespace TeamBlocker;
 public class TeamBlocker : BasePlugin, IPluginConfig<BaseConfigs>
 {
 	public override string ModuleName => "TeamBlocker";
-	public override string ModuleVersion => "1.0.0";
+	public override string ModuleVersion => "1.0.1";
 	public override string ModuleAuthor => "luca.uy";
 	public override string ModuleDescription => "Restricts how many players can join a team.";
 
 	public required BaseConfigs Config { get; set; }
+	private CCSGameRules? _gameRules;
 
 	public void OnConfigParsed(BaseConfigs config)
 	{
@@ -35,6 +36,7 @@ public class TeamBlocker : BasePlugin, IPluginConfig<BaseConfigs>
 		AddCommandListener("jointeam", JoinTeamListener, HookMode.Pre);
 		RegisterEventHandler<EventPlayerConnectFull>(OnPlayerConnectFull);
 		RegisterEventHandler<EventPlayerTeam>(OnPlayerTeam, HookMode.Pre);
+		RegisterEventHandler<EventRoundStart>(OnRoundStart, HookMode.Post);
 	}
 
 	public override void OnAllPluginsLoaded(bool hotReload)
@@ -48,6 +50,31 @@ public class TeamBlocker : BasePlugin, IPluginConfig<BaseConfigs>
 		{
 			manifest.AddResource(Config.SoundSettings.SoundFilePath);
 		}
+	}
+
+	private HookResult OnRoundStart(EventRoundStart @event, GameEventInfo info)
+	{
+		_gameRules = Utilities.FindAllEntitiesByDesignerName<CCSGameRulesProxy>("cs_gamerules").FirstOrDefault()?.GameRules;
+		return HookResult.Continue;
+	}
+
+	private bool IsWarmup()
+	{
+		if (_gameRules == null)
+		{
+			_gameRules = Utilities.FindAllEntitiesByDesignerName<CCSGameRulesProxy>("cs_gamerules").FirstOrDefault()?.GameRules;
+		}
+		return _gameRules?.WarmupPeriod ?? false;
+	}
+
+	private bool ShouldIgnoreLimits()
+	{
+		if (!Config.TeamSettings.IgnoreLimitsDuringWarmup)
+			return false;
+
+		bool isWarmup = IsWarmup();
+		Utils.Logger.LogDebug("WarmupCheck", $"IsWarmup: {isWarmup}, IgnoreLimits: {Config.TeamSettings.IgnoreLimitsDuringWarmup}");
+		return isWarmup;
 	}
 
 	public HookResult JoinTeamListener(CCSPlayerController? player, CommandInfo info)
@@ -105,6 +132,19 @@ public class TeamBlocker : BasePlugin, IPluginConfig<BaseConfigs>
 		{
 			Utils.Logger.LogDebug("JoinTeamListener", $"Player already in target team {targetTeam}, allowing");
 			return HookResult.Continue;
+		}
+
+		if (ShouldIgnoreLimits())
+		{
+			Utils.Logger.LogDebug("TeamJoin", $"Warmup active - ignoring team limits for {player.PlayerName}");
+			Server.NextFrame(() =>
+			{
+				if (player.IsValid)
+				{
+					player.ChangeTeam(targetTeam);
+				}
+			});
+			return HookResult.Handled;
 		}
 
 		int ctCount = TeamHelper.GetCurrentNumPlayersExcept(CsTeam.CounterTerrorist, player);
