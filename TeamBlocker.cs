@@ -13,7 +13,7 @@ namespace TeamBlocker;
 public class TeamBlocker : BasePlugin, IPluginConfig<BaseConfigs>
 {
 	public override string ModuleName => "TeamBlocker";
-	public override string ModuleVersion => "1.0.1";
+	public override string ModuleVersion => "1.0.2";
 	public override string ModuleAuthor => "luca.uy";
 	public override string ModuleDescription => "Restricts how many players can join a team.";
 
@@ -69,11 +69,11 @@ public class TeamBlocker : BasePlugin, IPluginConfig<BaseConfigs>
 
 	private bool ShouldIgnoreLimits()
 	{
-		if (!Config.TeamSettings.IgnoreLimitsDuringWarmup)
+		if (!Config.TeamSettings.IgnoreDuringWarmup)
 			return false;
 
 		bool isWarmup = IsWarmup();
-		Utils.Logger.LogDebug("WarmupCheck", $"IsWarmup: {isWarmup}, IgnoreLimits: {Config.TeamSettings.IgnoreLimitsDuringWarmup}");
+		Utils.Logger.LogDebug("WarmupCheck", $"IsWarmup: {isWarmup}, IgnoreLimits: {Config.TeamSettings.IgnoreDuringWarmup}");
 		return isWarmup;
 	}
 
@@ -184,11 +184,12 @@ public class TeamBlocker : BasePlugin, IPluginConfig<BaseConfigs>
 
 			if (player.Team is CsTeam.None)
 			{
-				Server.NextFrame(() =>
+				AddTimer(3.0f, () =>
 				{
-					if (player.IsValid)
+					if (player.IsValid && !ShouldIgnoreLimits())
 					{
 						player.ChangeTeam(CsTeam.Spectator);
+						Utils.Logger.LogDebug("TeamJoin", $"Moved {player.PlayerName} to spectator after 3s delay");
 					}
 				});
 			}
@@ -235,12 +236,21 @@ public class TeamBlocker : BasePlugin, IPluginConfig<BaseConfigs>
 		if (!Config.TeamSettings.MoveToSpectatorOnConnect)
 			return HookResult.Continue;
 
-		Server.NextFrame(() =>
+		if (ShouldIgnoreLimits())
 		{
-			if (player.IsValid)
+			Utils.Logger.LogDebug("PlayerConnect", $"Warmup active - not moving {player.PlayerName} to spectator");
+			return HookResult.Continue;
+		}
+
+		AddTimer(3.0f, () =>
+		{
+			if (player.IsValid && !player.IsBot && !player.IsHLTV)
 			{
-				player.ChangeTeam(CsTeam.Spectator);
-				Utils.Logger.LogDebug("PlayerConnect", $"Moved {player.PlayerName} to spectator on connect");
+				if (!ShouldIgnoreLimits())
+				{
+					player.ChangeTeam(CsTeam.Spectator);
+					Utils.Logger.LogDebug("PlayerConnect", $"Moved {player.PlayerName} to spectator after 3s delay");
+				}
 			}
 		});
 

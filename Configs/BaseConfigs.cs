@@ -26,8 +26,8 @@ public class TeamSettings
 	[JsonPropertyName("MoveToSpectatorOnConnect")]
 	public bool MoveToSpectatorOnConnect { get; set; } = true;
 
-	[JsonPropertyName("IgnoreLimitsDuringWarmup")]
-	public bool IgnoreLimitsDuringWarmup { get; set; } = false;
+	[JsonPropertyName("IgnoreDuringWarmup")]
+	public bool IgnoreDuringWarmup { get; set; } = true;
 }
 
 public class SoundSettings
