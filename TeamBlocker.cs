@@ -13,7 +13,7 @@ namespace TeamBlocker;
 public class TeamBlocker : BasePlugin, IPluginConfig<BaseConfigs>
 {
 	public override string ModuleName => "TeamBlocker";
-	public override string ModuleVersion => "1.0.2";
+	public override string ModuleVersion => "1.0.3";
 	public override string ModuleAuthor => "luca.uy";
 	public override string ModuleDescription => "Restricts how many players can join a team.";
 
@@ -136,15 +136,8 @@ public class TeamBlocker : BasePlugin, IPluginConfig<BaseConfigs>
 
 		if (ShouldIgnoreLimits())
 		{
-			Utils.Logger.LogDebug("TeamJoin", $"Warmup active - ignoring team limits for {player.PlayerName}");
-			Server.NextFrame(() =>
-			{
-				if (player.IsValid)
-				{
-					player.ChangeTeam(targetTeam);
-				}
-			});
-			return HookResult.Handled;
+			Utils.Logger.LogDebug("TeamJoin", $"Warmup active - ignoring team limits for {player.PlayerName}, allowing normal team join");
+			return HookResult.Continue;
 		}
 
 		int ctCount = TeamHelper.GetCurrentNumPlayersExcept(CsTeam.CounterTerrorist, player);
