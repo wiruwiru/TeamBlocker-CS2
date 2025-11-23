@@ -1,0 +1,58 @@
+name: TeamBlocker BUILD
+
+on:
+  release:
+    types: [created]
+
+env:
+  PROJECT_PATH: "TeamBlocker.csproj"
+  PROJECT_NAME: "TeamBlocker"
+  RELEASE_TAG: ${{ github.event.release.tag_name }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0.x
+    - name: Restore Dependencies
+      run: dotnet restore
+    - name: Build
+      run: dotnet build ${{ env.PROJECT_PATH }} -c Release
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-output
+        path: bin/Release/net8.0/
+
+  publish:
+    needs: build
+    permissions: write-all
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download Build Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output
+        path: bin/Release/net8.0/
+    - name: Create Package Directory
+      run: |
+        mkdir -p ${{ env.PROJECT_NAME }}
+    - name: Copy Build Files
+      run: |
+        cp bin/Release/net8.0/${{ env.PROJECT_NAME }}.dll ${{ env.PROJECT_NAME }}/
+        cp bin/Release/net8.0/${{ env.PROJECT_NAME }}.deps.json ${{ env.PROJECT_NAME }}/
+        cp bin/Release/net8.0/${{ env.PROJECT_NAME }}.pdb ${{ env.PROJECT_NAME }}/ 2>/dev/null || true
+        cp -r bin/Release/net8.0/lang ${{ env.PROJECT_NAME }}/ 2>/dev/null || true
+    - name: Create Zip
+      run: |
+        zip -r ${{ env.PROJECT_NAME }}-${{ env.RELEASE_TAG }}.zip ${{ env.PROJECT_NAME }}/
+    - name: Upload Release Asset
+      uses: softprops/action-gh-release@v2
+      with:
+        files: ${{ env.PROJECT_NAME }}-${{ env.RELEASE_TAG }}.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

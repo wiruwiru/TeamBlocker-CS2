@@ -1,0 +1,5 @@
+{
+  "prefix": "[{red}TeamBlocker{white}]",
+  "team.full": "¡No puedes unirte al equipo {0}! Se excedió el límite del equipo ({1}).",
+  "autoselect.blocked": "El auto-selección está deshabilitado. Por favor elige un equipo manualmente."
+}
